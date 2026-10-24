@@ -17,8 +17,8 @@
 # Signing: with --sign, MACOS_SIGN_IDENTITY (a "Developer ID Application: ..." name or its SHA-1
 # hash, found in the keychain) signs the app, the CLI and the DMG with the hardened runtime and a
 # secure timestamp. With the App Store Connect API key as well (APPLE_API_KEY_PATH = the .p8 file,
-# APPLE_API_KEY_ID, APPLE_API_ISSUER) the DMG and the CLI zip are notarized and the DMG is
-# stapled. Without --sign the app is ad-hoc signed and not notarized: the first launch needs
+# APPLE_API_KEY_ID, APPLE_API_ISSUER) the app, the DMG and the CLI zip are notarized; the app
+# and the DMG are stapled. Without --sign the app is ad-hoc signed, not notarized: first launch needs
 # right-click > Open.
 # Adapted from PhotoCraft's packaging (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 set -euo pipefail
@@ -59,6 +59,19 @@ notarize() {
     echo "notarization of $1 was not accepted" >&2
     return 1
   fi
+}
+
+# staple <path>: stapling can fail with error 65 for a while after Apple accepts a submission, so
+# try a few times.
+staple() {
+  local i
+  for i in 1 2 3 4 5 6; do
+    if xcrun stapler staple "$1"; then return 0; fi
+    echo "stapler staple failed (attempt $i), retrying" >&2
+    sleep "${STAPLE_RETRY_SLEEP:-20}"
+  done
+  echo "could not staple $1" >&2
+  return 1
 }
 
 ARCH=universal
@@ -169,6 +182,14 @@ if [ -n "$SIGN_IDENTITY" ]; then
   grep -q 'com.apple.security.cs.disable-library-validation' <<<"$info"
 fi
 test -x "$APP/Contents/MacOS/solidcraft-cli" || { echo "solidcraft-cli is missing from $APP" >&2; exit 1; }
+if [ "$NOTARIZE" = 1 ]; then
+  # Staple the app itself, so a copy dragged out of the DMG opens offline too.
+  echo "==> notarizing $APP"
+  ditto -c -k --keepParent "$APP" "$WORK/SolidCraft-app.zip"
+  notarize "$WORK/SolidCraft-app.zip"
+  staple "$APP"
+  xcrun stapler validate "$APP"
+fi
 
 # ---- DMG ---------------------------------------------------------------------------------------
 echo "==> building $DMG"
@@ -216,9 +237,10 @@ fi
 if [ "$NOTARIZE" = 1 ]; then
   echo "==> notarizing $DMG"
   notarize "$DMG"
-  xcrun stapler staple "$DMG"
+  staple "$DMG"
   xcrun stapler validate "$DMG"
-  # Gatekeeper's verdict on the app as a user gets it.
+  # Gatekeeper's verdict on the DMG and on the app as a user gets it.
+  spctl -a -t open --context context:primary-signature -vv "$DMG"
   MNT="$(mktemp -d)"
   hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
   spctl --assess --type execute --verbose=4 "$MNT/SolidCraft.app"

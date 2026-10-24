@@ -268,10 +268,22 @@ The app is signed with `packaging/macos/entitlements.plist`. Its
 `com.apple.security.cs.disable-library-validation` entitlement lets the hardened runtime load
 3Dconnexion's `3DconnexionClient.framework` (`crates/threedx-client/src/macos.rs`); without it
 the 3D mouse silently stops working. Test a notarized build with a real 3D mouse before
-publishing. The script notarizes the `.dmg` (and staples it) and the CLI `.zip` (a zip can't be
-stapled), then checks `stapler validate` and `spctl --assess` on the mounted app. To try it
+publishing. The script notarizes the app (a zip of it) and staples it before the `.dmg` is made,
+so a copy dragged to /Applications opens offline. It then notarizes and staples the `.dmg`, and
+notarizes the CLI `.zip` (a zip can't be stapled). `stapler staple` is retried, because it can
+fail with error 65 for a while after Apple accepts a submission. The checks are `stapler validate`
+and `spctl` on the `.dmg`, and `spctl --assess` on the mounted app. To try it
 locally, pass `--sign` and set `MACOS_SIGN_IDENTITY` and the `APPLE_API_KEY_PATH`, `APPLE_API_KEY_ID`,
 `APPLE_API_ISSUER` variables and run the script.
+
+The certificate expires in **November 2027**. To renew it, create a new Developer ID Application
+certificate in the Apple Developer account, export it with its key as a `.p12`, and replace
+`APPLE_CERTIFICATE_P12` and `APPLE_CERTIFICATE_PASSWORD`. Releases built before the expiry stay
+valid, because the signature carries a secure timestamp.
+
+Signing currently uses a maintainer's **personal** Developer ID, so downloads show that person's
+name, not an organisation's. Moving to an organisation account means replacing the certificate
+and the API key secrets (`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`).
 
 ## Update signing
 
