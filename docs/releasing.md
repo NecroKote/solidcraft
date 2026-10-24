@@ -128,8 +128,9 @@ change release infrastructure does not itself request publication of the applica
    and an example model on an available platform. Inspect the package-check job output for
    other platforms; report any platform you could not exercise yourself.
 3. Review the generated notes. Add a concise description of features, fixes, breaking changes,
-   and known limitations. Keep the installation instructions. Packages are currently unsigned;
-   do not claim otherwise. Resolve failed checks or missing artifacts before publication.
+   and known limitations. Keep the installation instructions. The macOS app is Developer ID
+   signed and notarized only when the build summary says so; other packages are unsigned. Do not
+   claim otherwise. Resolve failed checks or missing artifacts before publication.
 4. Publish the verified draft using `gh` or the equivalent GitHub release API. For example:
 
    ```sh
@@ -245,6 +246,32 @@ To enable it once (owner):
 When the token expires, create a new one the same way and run step 2 again. If a release was
 published while the secret was missing or expired, submit it afterwards with
 `gh workflow run winget.yml -R bherbruck/solidcraft -f tag=v<version>`.
+
+## macOS signing and notarization
+
+`packaging/macos/package.sh` signs with the hardened runtime and notarizes when the release
+workflow has these repository secrets; without them (forks, dry runs) it keeps the ad-hoc
+signature and the job summary says so:
+
+| Secret | Content |
+| --- | --- |
+| `APPLE_CERTIFICATE_P12` | base64 of the **Developer ID Application** certificate and key, exported as `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | password of that `.p12` |
+| `APPLE_API_KEY_P8` | text of the App Store Connect API key (`AuthKey_<id>.p8`) |
+| `APPLE_API_KEY_ID` | the key's ID |
+| `APPLE_API_ISSUER` | the issuer ID (App Store Connect > Users and Access > Integrations) |
+
+`packaging/macos/signing.sh --setup` imports the certificate into a temporary keychain after the
+build, and `--cleanup` removes it at the end of the job.
+
+The app is signed with `packaging/macos/entitlements.plist`. Its
+`com.apple.security.cs.disable-library-validation` entitlement lets the hardened runtime load
+3Dconnexion's `3DconnexionClient.framework` (`crates/threedx-client/src/macos.rs`); without it
+the 3D mouse silently stops working. Test a notarized build with a real 3D mouse before
+publishing. The script notarizes the `.dmg` (and staples it) and the CLI `.zip` (a zip can't be
+stapled), then checks `stapler validate` and `spctl --assess` on the mounted app. To try it
+locally, pass `--sign` and set `MACOS_SIGN_IDENTITY` and the `APPLE_API_KEY_PATH`, `APPLE_API_KEY_ID`,
+`APPLE_API_ISSUER` variables and run the script.
 
 ## Update signing
 
